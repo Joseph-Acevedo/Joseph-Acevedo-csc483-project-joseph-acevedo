@@ -47,11 +47,23 @@ public class QueryEngine {
         }
     }
 
-    public void testQuestions(WikiParser wiki) throws IOException {
+    public float testQuestions(WikiParser wiki) throws IOException {
+        float mmr = 0;
         for (Question q : this.questions) {
             System.out.printf("Question: %s\nAnswer: %s\nResults:", q.question, q.answer);
-            // wiki.answerQuestion(q.question);
+            List<ResultClass> results = wiki.answerQuestion(q.question.trim(), new String[] {"text", "section"});
+
+            for (int i = 0; i < results.size(); i++) {
+                ResultClass result = results.get(i);
+                if (result.doc.get("title").equalsIgnoreCase(q.answer)) {
+                    System.out.println("Answer found at index " + i);
+                    mmr += (1.0/(i + 1));
+                    break;
+                }
+            }
         }
+        mmr /= questions.size();
+        return mmr;
     }
 
     public static void main(String[] args) {
@@ -61,13 +73,9 @@ public class QueryEngine {
         try {
             wiki.buildIndex();
             Scanner scanner = new Scanner(System.in);
-            while (true) {
-                System.out.println("Question: ");
-                String input = scanner.nextLine().trim();
-                wiki.answerQuestion(input);
-            }
-            // qe.createAnswers();
-            // qe.testQuestions(wiki);
+            qe.createAnswers();
+            float mmr = qe.testQuestions(wiki);
+            System.out.println("MMR Score: " + mmr);
         } catch (IOException e) {
             e.printStackTrace();
         }

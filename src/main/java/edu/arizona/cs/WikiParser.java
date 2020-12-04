@@ -9,6 +9,7 @@ import org.apache.lucene.index.DirectoryReader;
 import org.apache.lucene.index.IndexReader;
 import org.apache.lucene.index.IndexWriter;
 import org.apache.lucene.index.IndexWriterConfig;
+import org.apache.lucene.queryparser.classic.MultiFieldQueryParser;
 import org.apache.lucene.queryparser.classic.ParseException;
 import org.apache.lucene.queryparser.classic.QueryParser;
 import org.apache.lucene.search.IndexSearcher;
@@ -100,10 +101,11 @@ public class WikiParser {
         this.indexExists = true;
     }
 
-    public List<ResultClass> answerQuestion(String query) throws IOException {
+    public List<ResultClass> answerQuestion(String query, String[] fields) throws IOException {
         Query q = null;
+        Sentence querySentence = new Sentence(query);
         try {
-            q = new QueryParser("text", analyzer).parse(query);
+            q = new MultiFieldQueryParser(fields, analyzer).parse(QueryParser.escape(String.join(" ", querySentence.lemmas())));
         } catch (ParseException e) {
             e.printStackTrace();
         }
@@ -122,7 +124,6 @@ public class WikiParser {
 
             ResultClass result = new ResultClass(d, hits[i].score);
             results.add(result);
-            System.out.printf("%d. [%s](%.2f) \t%s\n", (i+1), d.get("title"), result.score, d.get("text"));
         }
         return results;
     }
