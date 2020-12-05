@@ -1,6 +1,8 @@
 package edu.arizona.cs;
 
 import edu.stanford.nlp.simple.Sentence;
+import org.apache.lucene.analysis.Analyzer;
+import org.apache.lucene.analysis.core.StopAnalyzer;
 import org.apache.lucene.analysis.standard.StandardAnalyzer;
 import org.apache.lucene.document.Field;
 import org.apache.lucene.document.StringField;
@@ -16,9 +18,13 @@ import org.apache.lucene.search.IndexSearcher;
 import org.apache.lucene.search.Query;
 import org.apache.lucene.search.ScoreDoc;
 import org.apache.lucene.search.TopDocs;
+import org.apache.lucene.search.similarities.BM25Similarity;
+import org.apache.lucene.search.similarities.ClassicSimilarity;
+import org.apache.lucene.search.similarities.TFIDFSimilarity;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.store.FSDirectory;
+import org.tartarus.snowball.ext.PorterStemmer;
 
 import java.io.File;
 import java.io.IOException;
@@ -29,10 +35,13 @@ import java.util.Scanner;
 
 public class WikiParser {
 
+    private static final String STOP_WORDS_FILEPATH = "C:\\Users\\Joseph\\git\\csc483-project-joseph-acevedo\\src\\main\\resources\\stopwords.txt";
     private String inputDirectory;
-    private StandardAnalyzer analyzer;
+    private PorterStemmer stemmer;
+    private Analyzer analyzer;
     private Directory index;
     private boolean indexExists;
+    private static final boolean LEMMATIZE = false;
 
     public WikiParser(String inputDirectory, boolean indexExists) {
         this.inputDirectory = inputDirectory;
@@ -40,8 +49,13 @@ public class WikiParser {
     }
 
     public void buildIndex() throws IOException {
-        this.analyzer = new StandardAnalyzer();
-        this.index = FSDirectory.open(Paths.get(String.format("%s\\index", this.inputDirectory)));
+        this.stemmer = new PorterStemmer();
+        this.analyzer = new StopAnalyzer(Paths.get(STOP_WORDS_FILEPATH)); //ptrstm_nsw_index
+        if (LEMMATIZE) {
+            this.index = FSDirectory.open(Paths.get(String.format("%s\\cnlp_sw_index", this.inputDirectory)));
+        } else {
+            this.index = FSDirectory.open(Paths.get(String.format("%s\\ptrstm_nsw_index", this.inputDirectory)));
+        }
         if (indexExists)
             return;
         IndexWriterConfig config = new IndexWriterConfig(analyzer);
@@ -52,13 +66,14 @@ public class WikiParser {
         Document currDoc = null;
         for (File file : directory.listFiles()) {
             // Directory should only contain the txt files
+            System.out.println("File: " + file.getName());
             if (file.isDirectory()) {
                 continue;
             }
 
             Scanner fileScanner = new Scanner(file);
             while (fileScanner.hasNextLine()) {
-                String line = fileScanner.nextLine();
+                String line = fileScanner.nextLine().toLowerCase();
                 line = line.replaceAll("&nbsp;", " ");
                 if (line.isEmpty() || line.trim().isEmpty())
                     continue;
@@ -77,17 +92,21 @@ public class WikiParser {
                 } else if (line.startsWith("==") && line.endsWith("==")) {
                     // ==section title==
                     // for now treat the same as normal text
-                    Sentence titleSent = new Sentence(line);
-                    for (String lemma : titleSent.lemmas()) {
-                        currDoc.add(new TextField("section", lemma, Field.Store.YES));
+                    String[] tokens = line.split("[\\.,\\s!;?:\"]+");
+                    for (String token : tokens) {
+                        stemmer.setCurrent(token);
+                        stemmer.stem();
+                        currDoc.add(new TextField("section", stemmer.getCurrent(), Field.Store.YES));
                     }
                 } else {
                     // line in wiki page
-                    // using Stanford CoreNLP for lemmatization
+                    // using porter stemmer for stemming
                     try {
-                        Sentence standSent = new Sentence(line);
-                        for (String lemma : standSent.lemmas()) {
-                            currDoc.add(new TextField("text", lemma, Field.Store.YES));
+                        String[] tokens = line.split("[\\.,\\s!;?:\"]+");
+                        for (String token : tokens) {
+                            stemmer.setCurrent(token);
+                            stemmer.stem();
+                            currDoc.add(new TextField("text", stemmer.getCurrent(), Field.Store.YES));
                         }
                     } catch (Exception e) {
                         System.out.println("Error on line: " + line);
@@ -101,11 +120,18 @@ public class WikiParser {
         this.indexExists = true;
     }
 
-    public List<ResultClass> answerQuestion(String query, String[] fields) throws IOException {
+    public List<ResultClass> answerQuestion(String query) throws IOException {
         Query q = null;
-        Sentence querySentence = new Sentence(query);
         try {
-            q = new MultiFieldQueryParser(fields, analyzer).parse(QueryParser.escape(String.join(" ", querySentence.lemmas())));
+            if (LEMMATIZE) {
+                Sentence sent = new Sentence(query);
+                query = String.join(" ", sent.lemmas());
+            } else {
+                stemmer.setCurrent(query);
+                stemmer.stem();
+                query = stemmer.getCurrent();
+            }
+            q = new QueryParser("text", analyzer).parse(QueryParser.escape(query));
         } catch (ParseException e) {
             e.printStackTrace();
         }
@@ -123,6 +149,7 @@ public class WikiParser {
             Document d = searcher.doc(docId);
 
             ResultClass result = new ResultClass(d, hits[i].score);
+            System.out.printf("%d. [%s](%.5f)\n", i+1, d.get("title"), hits[i].score);
             results.add(result);
         }
         return results;
